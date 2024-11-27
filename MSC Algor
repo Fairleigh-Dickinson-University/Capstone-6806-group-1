@@ -1,0 +1,203 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import networkx as nx
+
+
+def main_community_detection_from_xls_file(filename, lambda_val, n_iterations):
+    """
+    Main function to perform community detection from an XLS file containing the adjacency matrix.
+    """
+    print("Step 1: Reading the .xls file and converting it into an adjacency matrix...")
+    A = read_xls_as_adjacency_matrix(filename)
+    main_community_detection_from_adj_matrix(A, lambda_val, n_iterations)
+
+
+def read_xls_as_adjacency_matrix(filename):
+    """
+    Reads the adjacency matrix from an Excel file and converts it to a binary adjacency matrix.
+    """
+    import pandas as pd
+
+    A = pd.read_excel(filename, header=None).to_numpy()
+    A[A != 0] = 1  # Convert any non-zero values to 1
+    return A
+
+
+def main_community_detection_from_adj_matrix(A, lambda_val, n_iterations):
+    """
+    Main function to handle the entire community detection process.
+    """
+    print("Step 2: Computing the Markov Similarity Matrix...")
+    R_n = compute_markov_similarity_from_adj_matrix(A, n_iterations)
+
+    print("Step 3: Detecting Initial Communities...")
+    initial_communities, most_similar_pairs = find_communities(R_n)
+    print("Initial Communities:")
+    print_communities(initial_communities)
+
+    plot_initial_community_graph(initial_communities, most_similar_pairs)
+
+    print("Step 4: Merging Small Communities...")
+    final_communities = merge_small_communities(initial_communities, A, lambda_val)
+    print("Final Communities:")
+    print_communities(final_communities)
+
+    Q = calculate_modularity(final_communities, A)
+    print("Final Modularity (Q):", Q)
+
+    plot_final_community_graph(A, final_communities)
+
+
+def compute_markov_similarity_from_adj_matrix(A, n_iterations):
+    """
+    Computes the Markov Similarity Matrix from the adjacency matrix with a fixed number of iterations.
+    """
+    N = A.shape[0]
+    degree = np.sum(A, axis=1)
+    normalized_adj_matrix = np.zeros((N, N))
+
+    for i in range(N):
+        if degree[i] > 0:
+            normalized_adj_matrix[i, :] = A[i, :] / degree[i]
+
+    similarity_matrix = np.zeros((N, N))
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                similarity_matrix[i, j] = compute_node_similarity(i, j, A)
+
+    state_transition_matrix = np.zeros((N, N))
+    for i in range(N):
+        row_sum = np.sum(similarity_matrix[i, :])
+        if row_sum > 0:
+            state_transition_matrix[i, :] = similarity_matrix[i, :] / row_sum
+        else:
+            state_transition_matrix[i, :] = 1 / N
+
+    R_n = normalized_adj_matrix
+
+    for _ in range(n_iterations):
+        R_n = np.dot(R_n, state_transition_matrix)  # Iterative similarity update
+
+    return R_n
+
+
+def compute_node_similarity(node1, node2, A):
+    """
+    Computes the similarity between two nodes in an undirected graph using the Jaccard index.
+    """
+    neighbors1 = set(np.where(A[node1, :] == 1)[0])
+    neighbors2 = set(np.where(A[node2, :] == 1)[0])
+    intersection = len(neighbors1 & neighbors2)
+    union = len(neighbors1 | neighbors2)
+    return intersection / union if union > 0 else 0
+
+
+def find_communities(R_n):
+    """
+    Detects initial communities from the similarity matrix.
+    """
+    N = R_n.shape[0]
+    most_similar_pairs = []
+    for i in range(N):
+        max_similarity = max(R_n[i, [j for j in range(N) if j != i]])
+        similar_nodes = np.where((R_n[i, :] == max_similarity) & (np.arange(N) != i))[0]
+        for j in similar_nodes:
+            most_similar_pairs.append((i, j))
+
+    G = nx.Graph()
+    G.add_edges_from(most_similar_pairs)
+
+    communities = [list(component) for component in nx.connected_components(G)]
+    return communities, most_similar_pairs
+
+
+def merge_small_communities(initial_communities, A, lambda_val):
+    """
+    Merges small communities based on the modularity threshold (lambda).
+    """
+    large_communities = [comm for comm in initial_communities if len(comm) >= lambda_val]
+    small_communities = [comm for comm in initial_communities if len(comm) < lambda_val]
+
+    for small in small_communities:
+        best_similarity = -1
+        best_large = None
+        for node in small:
+            for large in large_communities:
+                for large_node in large:
+                    similarity = compute_node_similarity(node, large_node, A)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_large = large
+        if best_large is not None:
+            best_large.extend(small)
+
+    return large_communities
+
+
+def calculate_modularity(communities, A):
+    """
+    Calculates the modularity score for the detected communities.
+    """
+    N = A.shape[0]
+    E = np.sum(A) / 2
+    degree = np.sum(A, axis=1)
+
+    Q = 0
+    for community in communities:
+        for i in community:
+            for j in community:
+                Q += A[i, j] - (degree[i] * degree[j]) / (2 * E)
+    Q /= 2 * E
+    return Q
+
+
+def print_communities(communities):
+    """
+    Prints the detected communities in a readable format.
+    """
+    for i, community in enumerate(communities):
+        print(f"Community {i + 1}: {set(community)}")
+
+
+def plot_initial_community_graph(initial_communities, most_similar_pairs, filename="initial_community_graph.png"):
+    """
+    Plots the graph representing initial communities.
+    """
+    G = nx.Graph()
+    G.add_edges_from(most_similar_pairs)
+    pos = nx.spring_layout(G, k=1.5, seed=42)
+
+    node_colors = np.zeros(len(G.nodes))
+    for community_id, community in enumerate(initial_communities):
+        for node in community:
+            node_colors[node] = community_id
+
+    plt.figure()
+    nx.draw(G, pos, with_labels=True, node_color=node_colors, cmap=plt.cm.tab10, node_size=300)
+    plt.title("Graph Representing Initial Communities")
+    plt.savefig(filename)
+    plt.show()
+
+
+def plot_final_community_graph(A, final_communities, filename="final_community_graph.png"):
+    """
+    Plots the graph representing final communities.
+    """
+    G = nx.Graph(A)
+    pos = nx.spring_layout(G, k=1.5, seed=42)
+
+    node_colors = np.zeros(len(G.nodes))
+    for community_id, community in enumerate(final_communities):
+        for node in community:
+            node_colors[node] = community_id
+
+    plt.figure()
+    nx.draw(G, pos, with_labels=True, node_color=node_colors, cmap=plt.cm.tab10, node_size=300)
+    plt.title("Graph Representing Final Communities")
+    plt.savefig(filename)
+    plt.show()
+
+
+# Example Usage
+# main_community_detection_from_xls_file('your_file.xlsx', lambda_val=5, n_iterations=10)
