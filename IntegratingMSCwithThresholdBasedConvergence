@@ -1,1 +1,191 @@
+import numpy as np
+import pandas as pd
+import networkx as nx
+import matplotlib.pyplot as plt
 
+def main_community_detection_from_xls_file(filename, lambda_val, max_iterations, tolerance):
+    print('Step 1: Reading the .xls file and converting it into an adjacency matrix...')
+    A = read_xls_as_adjacency_matrix(filename)
+    main_community_detection_from_adj_matrix(A, lambda_val, max_iterations, tolerance)
+
+def read_xls_as_adjacency_matrix(filename):
+    A = pd.read_excel(filename, header=None).to_numpy()
+    A[A != 0] = 1
+    return A
+
+def main_community_detection_from_adj_matrix(A, lambda_val, max_iterations, tolerance):
+    R_n = compute_markov_similarity_from_adj_matrix_with_threshold(A, max_iterations, tolerance)
+    initial_communities, most_similar_pairs = find_communities(R_n)
+    print('Initial Communities (Sets):')
+    print_communities(initial_communities)
+    plot_initial_community_graph(initial_communities, most_similar_pairs)
+    final_communities = merge_small_communities(initial_communities, A, lambda_val)
+    print('Final Communities (Sets):')
+    print_communities(final_communities)
+    Q = calculate_modularity(final_communities, A)
+    print('Final Modularity (Q):')
+    print(Q)
+    plot_final_community_graph(A, final_communities)
+
+def compute_markov_similarity_from_adj_matrix_with_threshold(A, max_iterations, tolerance):
+    N = A.shape[0]
+    degree = np.sum(A, axis=1)
+    normalized_adj_matrix = np.zeros((N, N))
+
+    for i in range(N):
+        if degree[i] > 0:
+            normalized_adj_matrix[i, :] = A[i, :] / degree[i]
+
+    similarity_matrix = np.zeros((N, N))
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                similarity_matrix[i, j] = compute_node_similarity(i, j, A)
+
+    state_transition_matrix = np.zeros((N, N))
+    for i in range(N):
+        row_sum = np.sum(similarity_matrix[i, :])
+        if row_sum > 0:
+            state_transition_matrix[i, :] = similarity_matrix[i, :] / row_sum
+        else:
+            state_transition_matrix[i, :] = 1 / N
+
+    R_n = normalized_adj_matrix
+    converged = False
+    iteration_count = 0
+
+    while not converged and iteration_count < max_iterations:
+        R_new = np.zeros((N, N))
+        for i in range(N):
+            for j in range(N):
+                if i != j:
+                    neighbors_i = np.where(A[i, :] == 1)[0]
+                    common_neighbors = np.intersect1d(neighbors_i, np.where(A[j, :] == 1)[0])
+                    if common_neighbors.size > 0:
+                        R_new[i, j] = np.sum(R_n[i, common_neighbors] * state_transition_matrix[common_neighbors, j])
+                    else:
+                        R_new[i, j] = 0
+
+        # Normalize the rows of R_new
+        R_new = R_new / R_new.sum(axis=1, keepdims=True, where=(R_new.sum(axis=1) > 0))
+
+        # Check convergence using Frobenius norm
+        if np.linalg.norm(R_new - R_n, 'fro') < tolerance:
+            converged = True
+        else:
+            R_n = R_new
+            iteration_count += 1
+
+            # Print the number of iterations taken
+        print(f"Iterations completed: {iteration_count}")
+
+    return R_n
+
+def find_communities(R_n):
+    N = R_n.shape[0]
+    most_similar_pairs = []
+    for i in range(N):
+        max_similarity = np.max(R_n[i, np.r_[:i, i + 1:N]])
+        similar_nodes = np.where((R_n[i, :] == max_similarity) & (np.arange(N) != i))[0]
+        for j in similar_nodes:
+            most_similar_pairs.append((i, j))
+
+    print('Most Similar Pairs:')
+    print(most_similar_pairs)
+
+    G = nx.Graph()
+    G.add_edges_from(most_similar_pairs)
+    components = list(nx.connected_components(G))
+    return components, most_similar_pairs
+
+
+def plot_initial_community_graph(initial_communities, most_similar_pairs, filename="initial_community_graph.png"):
+    G = nx.Graph()
+    G.add_edges_from(most_similar_pairs)
+
+    pos = nx.spring_layout(G, k=1.5, seed=42)
+
+    # Find the maximum node index to determine the size of node_colors
+    max_node_index = max(max(u, v) for u, v in most_similar_pairs)
+    node_colors = np.zeros(max_node_index + 1)
+
+    for community_id, community in enumerate(initial_communities):
+        for node in community:
+            if node <= max_node_index:  # Ensure the node index is within bounds
+                node_colors[node] = community_id
+
+    plt.figure()
+    nx.draw(G, pos, with_labels=True, node_color=node_colors[:len(G.nodes)], cmap=plt.cm.tab10, node_size=300)
+    plt.title('Graph Representing Initial Communities')
+    plt.savefig(filename, format="png", dpi=300)
+    plt.show()
+
+def plot_final_community_graph(A, final_communities, filename="final_community_graph.png"):
+    G = nx.Graph(A)
+    pos = nx.spring_layout(G)
+    node_colors = np.zeros(len(G.nodes))
+    for community_id, community in enumerate(final_communities):
+        for node in community:
+            node_colors[node] = community_id
+
+    plt.figure()
+    nx.draw(G, pos, with_labels=True, node_color=node_colors[:len(G.nodes)], cmap=plt.cm.tab10, node_size=300)
+    plt.title('Original Graph with Final Community Structure')
+    plt.savefig(filename, format="png", dpi=300)
+    plt.show()
+
+
+def merge_small_communities(initial_communities, A, lambda_val):
+    # Separate communities into small and large based on lambda_val
+    small_communities = [comm for comm in initial_communities if len(comm) < lambda_val]
+    large_communities = [comm for comm in initial_communities if len(comm) >= lambda_val]
+
+    for small_community in small_communities:
+        best_similarity = -np.inf
+        best_pair = None
+
+        for node in small_community:
+            for large_community in large_communities:
+                for large_node in large_community:
+                    similarity = compute_node_similarity(node, large_node, A)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_pair = (node, large_node)
+
+        node_to_merge = best_pair[1]
+        for large_community in large_communities:
+            if node_to_merge in large_community:
+                large_community.update(small_community)  # Use `update` instead of `extend`
+                break
+
+    return large_communities
+
+
+def compute_node_similarity(node1, node2, A):
+    A = A + np.eye(A.shape[0])
+    neighbors1 = np.where(A[node1, :] == 1)[0]
+    neighbors2 = np.where(A[node2, :] == 1)[0]
+    intersection = len(np.intersect1d(neighbors1, neighbors2))
+    union_ = len(np.union1d(neighbors1, neighbors2))
+    return intersection / union_ if union_ > 0 else 0
+
+def calculate_modularity(communities, A):
+    N = A.shape[0]
+    E = np.count_nonzero(A) / 2
+    degree = np.sum(A, axis=1)
+    Q = 0
+
+    for i in range(N):
+        for j in range(N):
+            if any(i in comm and j in comm for comm in communities):
+                expected_edges = (degree[i] * degree[j]) / (2 * E)
+                Q += (A[i, j] - expected_edges) / (2 * E)
+    return Q
+
+def print_communities(communities):
+    for i, community in enumerate(communities):
+        clean_community = {int(node) for node in community}
+        print(f'Community {i + 1}: {clean_community}')
+
+# Example call to the main function
+main_community_detection_from_xls_file('dataset.xlsx', lambda_val=5, max_iterations=1, tolerance=1e-5)
