@@ -13,7 +13,7 @@ The goal of Random Sampling with Heuristics is to reduce computational cost by f
 
 3. Skip or Partial Update: Only perform full similarity and Markov similarity computations for the selected nodes.
 
-## Not adpoted:
+## Why This Method Was Not adpoted:
 However, this method was not adopted finally, because of:
 
 Loss of Accuracy: By focusing only on a sampled subset of nodes, the algorithm missed important global relationships in the network.
