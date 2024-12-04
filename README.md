@@ -7,13 +7,13 @@
 - Chu Liu, 2072044, c.liu1@student.fdu.edu;
 - Hang Su, 2088646, h.su@student.fdu.edu.
 
-## MSC Algorithm:
+### MSC Algorithm:
 Daozheng Qu, Chu Liu, Yuchuan Wang, Hang Su, Min Luo.
 
-## Integrating MSC with Threshold-Based Convergence
+### Integrating MSC with Threshold-Based Convergence
 Yuchuan Wang, Hang Su.
 
-## Integrating MSC with Random Sampling with Heuristics
+### Integrating MSC with Random Sampling with Heuristics
 Daozheng Qu, Chu Liu, Min Luo. 
 
 ## Overview
