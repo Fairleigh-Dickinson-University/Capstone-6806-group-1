@@ -7,7 +7,7 @@
 - Chu Liu, 2072044, c.liu1@student.fdu.edu;
 - Hang Su, 2088646, h.su@student.fdu.edu.
 
-### MSC Algorithm:
+### MSC Algorithm Reproduction：
 - Daozheng Qu, Chu Liu, Yuchuan Wang, Hang Su, Min Luo.
 
 ### Integrating MSC with Threshold-Based Convergence
